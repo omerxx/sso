@@ -710,12 +710,10 @@ func (p *OAuthProxy) Authenticate(rw http.ResponseWriter, req *http.Request) (er
 		}
 	}
 
-	// Run all defined validators, and allow the request if:
-	// - any one of them succeeds.
-	// - they all return the 'AuthProviderUnavailable' error, and the session is within the grace period.
-	// Otherwise (if all validators explicitly failed), reject the request.
-
-	// Run all defined validators, and allow the request if any of them succeed.
+	// Run all defined validators, and allow the request if any of them succeed. The group validation relies
+	// on the upstream provider, so a grace period is applied if the provider is unavailable.
+	// All requests will have already had the validators ran against them as part of the initial OAuthCallback login flow,
+	// *without* a grace period applied.
 	errors := options.RunValidatorsWithGracePeriod(p.Validators, session)
 	if len(errors) == len(p.Validators) {
 		tags = append(tags, "error:validation_failed")

@@ -70,7 +70,8 @@ func (p *SingleFlightProvider) Redeem(redirectURL, code string) (*sessions.Sessi
 	return p.provider.Redeem(redirectURL, code)
 }
 
-// ValidateGroup takes an email, allowedGroups, and userGroups and passes it to the provider's ValidateGroup function and returns the response
+// ValidateGroup takes an email, allowedGroups, and a SessionState, and passes it to the provider's ValidateGroup
+// function and returns the response
 func (p *SingleFlightProvider) ValidateGroup(email string, allowedGroups []string, s *sessions.SessionState) ([]string, bool, error) {
 	return p.provider.ValidateGroup(email, allowedGroups, s)
 }
@@ -94,7 +95,7 @@ func (p *SingleFlightProvider) UserGroups(email string, groups []string, accessT
 	return groups, nil
 }
 
-// ValidateSessionState calls the provider's ValidateSessionState function and returns the response
+// ValidateSessionState takes in a SessionState and returns false if the session if not validated, and true if it is.
 func (p *SingleFlightProvider) ValidateSessionState(s *sessions.SessionState) bool {
 	response, err := p.do("ValidateSessionState", s.AccessToken, func() (interface{}, error) {
 		valid := p.provider.ValidateSessionState(s)
@@ -112,8 +113,7 @@ func (p *SingleFlightProvider) ValidateSessionState(s *sessions.SessionState) bo
 	return valid
 }
 
-// RefreshSession takes in a SessionState and allowedGroups and
-// returns false if the session is not refreshed and true if it is.
+// RefreshSession takes in a SessionState and returns false if the session is not refreshed and true if it is.
 func (p *SingleFlightProvider) RefreshSession(s *sessions.SessionState) (bool, error) {
 	response, err := p.do("RefreshSession", s.RefreshToken, func() (interface{}, error) {
 		return p.provider.RefreshSession(s)

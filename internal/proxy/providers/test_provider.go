@@ -8,11 +8,11 @@ import (
 
 // TestProvider is a mock provider
 type TestProvider struct {
-	RefreshSessionFunc  func(*sessions.SessionState, []string) (bool, error)
-	ValidateSessionFunc func(*sessions.SessionState, []string) bool
+	RefreshSessionFunc  func(*sessions.SessionState) (bool, error)
+	ValidateSessionFunc func(*sessions.SessionState) bool
 	RedeemFunc          func(string, string) (*sessions.SessionState, error)
 	UserGroupsFunc      func(string, []string, string) ([]string, error)
-	ValidateGroupsFunc  func(string, []string, string) ([]string, bool, error)
+	ValidateGroupsFunc  func(string, []string, *sessions.SessionState) ([]string, bool, error)
 	*ProviderData
 }
 
@@ -47,8 +47,8 @@ func NewTestProvider(providerURL *url.URL, emailAddress string) *TestProvider {
 }
 
 // ValidateSessionState mocks the ValidateSessionState function
-func (tp *TestProvider) ValidateSessionState(s *sessions.SessionState, groups []string) bool {
-	return tp.ValidateSessionFunc(s, groups)
+func (tp *TestProvider) ValidateSessionState(s *sessions.SessionState) bool {
+	return tp.ValidateSessionFunc(s)
 }
 
 // Redeem mocks the provider Redeem function
@@ -57,8 +57,8 @@ func (tp *TestProvider) Redeem(redirectURL string, token string) (*sessions.Sess
 }
 
 // RefreshSession mocks the RefreshSession function
-func (tp *TestProvider) RefreshSession(s *sessions.SessionState, g []string) (bool, error) {
-	return tp.RefreshSessionFunc(s, g)
+func (tp *TestProvider) RefreshSession(s *sessions.SessionState) (bool, error) {
+	return tp.RefreshSessionFunc(s)
 }
 
 // UserGroups mocks the UserGroups function
@@ -67,8 +67,8 @@ func (tp *TestProvider) UserGroups(email string, groups []string, accessToken st
 }
 
 // ValidateGroup mocks the ValidateGroup function
-func (tp *TestProvider) ValidateGroup(email string, groups []string, accessToken string) ([]string, bool, error) {
-	return tp.ValidateGroupsFunc(email, groups, accessToken)
+func (tp *TestProvider) ValidateGroup(email string, groups []string, s *sessions.SessionState) ([]string, bool, error) {
+	return tp.ValidateGroupsFunc(email, groups, s)
 }
 
 // GetSignOutURL mocks GetSignOutURL function
