@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/buzzfeed/sso/internal/pkg/sessions"
+	"github.com/buzzfeed/sso/internal/proxy/providers"
 )
 
 var (
@@ -27,6 +28,19 @@ func RunValidators(validators []Validator, session *sessions.SessionState) []err
 		if err != nil {
 			validatorErrors = append(validatorErrors, err)
 		}
+	}
+	return validatorErrors
+}
+
+func RunValidatorsWithGracePeriod(validators []Validator, session *sessions.SessionState) []error {
+	validatorErrors := make([]error, 0, len(validators))
+	for _, err := range RunValidators(validators, session) {
+		if err, ok := err.(*providers.GroupValidationError); ok {
+			if err.IsWithinGracePeriod() {
+				continue
+			}
+		}
+		validatorErrors = append(validatorErrors, err)
 	}
 	return validatorErrors
 }

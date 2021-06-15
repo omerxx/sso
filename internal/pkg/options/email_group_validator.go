@@ -40,9 +40,9 @@ func (v EmailGroupValidator) Validate(session *sessions.SessionState) error {
 }
 
 func (v EmailGroupValidator) validate(session *sessions.SessionState) error {
-	matchedGroups, valid, err := v.Provider.ValidateGroup(session.Email, v.AllowedGroups, session.AccessToken)
+	matchedGroups, valid, err := v.Provider.ValidateGroup(session.Email, v.AllowedGroups, session)
 	if err != nil {
-		return ErrValidationError
+		return err
 	}
 
 	if valid {

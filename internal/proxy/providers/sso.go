@@ -28,6 +28,20 @@ var (
 )
 
 // Errors
+
+type GroupValidationError struct {
+	WithinGracePeriod bool
+	Err               error
+}
+
+func (e *GroupValidationError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *GroupValidationError) IsWithinGracePeriod() bool {
+	return e.WithinGracePeriod
+}
+
 var (
 	ErrMissingRefreshToken     = errors.New("missing refresh token")
 	ErrAuthProviderUnavailable = errors.New("auth provider unavailable")
@@ -176,7 +190,7 @@ func (p *SSOProvider) Redeem(redirectURL, code string) (*sessions.SessionState, 
 
 // ValidateGroup does a GET request to the profile url and returns true if the user belongs to
 // an authorized group.
-func (p *SSOProvider) ValidateGroup(email string, allowedGroups []string, accessToken string) ([]string, bool, error) {
+func (p *SSOProvider) ValidateGroup(email string, allowedGroups []string, s *sessions.SessionState) ([]string, bool, error) {
 	logger := log.NewLogEntry()
 
 	logger.WithUser(email).WithAllowedGroups(allowedGroups).Info("validating groups")
@@ -185,9 +199,14 @@ func (p *SSOProvider) ValidateGroup(email string, allowedGroups []string, access
 		return inGroups, true, nil
 	}
 
-	userGroups, err := p.UserGroups(email, allowedGroups, accessToken)
+	userGroups, err := p.UserGroups(email, allowedGroups, s.AccessToken)
 	if err != nil {
-		return nil, false, err
+		if err == ErrAuthProviderUnavailable && p.withinGracePeriod(s) {
+			tags := []string{"action:validate_group", "error:user_groups_error"}
+			p.StatsdClient.Incr("provider_error_fallback", tags, 1.0)
+			return nil, false, &GroupValidationError{Err: err, WithinGracePeriod: true}
+		}
+		return nil, false, &GroupValidationError{Err: err, WithinGracePeriod: false}
 	}
 
 	allowed := false
@@ -250,7 +269,7 @@ func (p *SSOProvider) UserGroups(email string, groups []string, accessToken stri
 
 // RefreshSession takes a SessionState and allowedGroups and refreshes the session access token,
 // returns `true` on success, and `false` on error
-func (p *SSOProvider) RefreshSession(s *sessions.SessionState, allowedGroups []string) (bool, error) {
+func (p *SSOProvider) RefreshSession(s *sessions.SessionState) (bool, error) {
 	logger := log.NewLogEntry()
 
 	if s.RefreshToken == "" {
@@ -270,25 +289,6 @@ func (p *SSOProvider) RefreshSession(s *sessions.SessionState, allowedGroups []s
 		}
 		return false, err
 	}
-
-	inGroups, validGroup, err := p.ValidateGroup(s.Email, allowedGroups, newToken)
-	if err != nil {
-		// When we detect that the auth provider is not explicitly denying
-		// authentication, and is merely unavailable, we refresh and continue
-		// as normal during the "grace period"
-		if err == ErrAuthProviderUnavailable && p.withinGracePeriod(s) {
-			tags := []string{"action:refresh_session", "error:user_groups_failed"}
-			p.StatsdClient.Incr("provider_error_fallback", tags, 1.0)
-			s.RefreshDeadline = extendDeadline(p.SessionValidTTL)
-			return true, nil
-		}
-		return false, err
-	}
-	if !validGroup {
-		ErrRefreshGroupMembership := errors.New("refresh: invalid group membership")
-		return false, ErrRefreshGroupMembership
-	}
-	s.Groups = inGroups
 
 	s.AccessToken = newToken
 	s.RefreshDeadline = extendDeadline(duration)
@@ -344,8 +344,8 @@ func (p *SSOProvider) redeemRefreshToken(refreshToken string) (token string, exp
 	return
 }
 
-// ValidateSessionState takes a sessionState and allowedGroups and validates the session state
-func (p *SSOProvider) ValidateSessionState(s *sessions.SessionState, allowedGroups []string) bool {
+// ValidateSessionState takes a sessionState and validates the session
+func (p *SSOProvider) ValidateSessionState(s *sessions.SessionState) bool {
 	logger := log.NewLogEntry()
 
 	// we validate the user's access token is valid
@@ -376,33 +376,10 @@ func (p *SSOProvider) ValidateSessionState(s *sessions.SessionState, allowedGrou
 			s.ValidDeadline = extendDeadline(p.SessionValidTTL)
 			return true
 		}
-		logger.WithUser(s.Email).WithHTTPStatus(resp.StatusCode).Info(
+		logger.WithUser(s.Email).WithHTTPStatus(resp.StatusCode).Error(
 			"could not validate user access token")
 		return false
 	}
-
-	// check the user is in the proper group(s)
-	inGroups, validGroup, err := p.ValidateGroup(s.Email, allowedGroups, s.AccessToken)
-	if err != nil {
-		// When we detect that the auth provider is not explicitly denying
-		// authentication, and is merely unavailable, we validate and continue
-		// as normal during the "grace period"
-		if err == ErrAuthProviderUnavailable && p.withinGracePeriod(s) {
-			tags := []string{"action:validate_session", "error:user_groups_failed"}
-			p.StatsdClient.Incr("provider_error_fallback", tags, 1.0)
-			s.ValidDeadline = extendDeadline(p.SessionValidTTL)
-			return true
-		}
-		logger.WithUser(s.Email).Error(err, "error fetching group memberships")
-		return false
-	}
-
-	if !validGroup {
-		logger.WithUser(s.Email).WithAllowedGroups(allowedGroups).Info(
-			"user is no longer in valid groups")
-		return false
-	}
-	s.Groups = inGroups
 
 	s.ValidDeadline = extendDeadline(p.SessionValidTTL)
 	s.GracePeriodStart = time.Time{}
