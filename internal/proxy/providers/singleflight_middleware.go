@@ -71,8 +71,8 @@ func (p *SingleFlightProvider) Redeem(redirectURL, code string) (*sessions.Sessi
 }
 
 // ValidateGroup takes an email, allowedGroups, and userGroups and passes it to the provider's ValidateGroup function and returns the response
-func (p *SingleFlightProvider) ValidateGroup(email string, allowedGroups []string, accessToken string) ([]string, bool, error) {
-	return p.provider.ValidateGroup(email, allowedGroups, accessToken)
+func (p *SingleFlightProvider) ValidateGroup(email string, allowedGroups []string, s *sessions.SessionState) ([]string, bool, error) {
+	return p.provider.ValidateGroup(email, allowedGroups, s)
 }
 
 // UserGroups takes an email and passes it to the provider's UserGroups function and returns the response
@@ -95,9 +95,9 @@ func (p *SingleFlightProvider) UserGroups(email string, groups []string, accessT
 }
 
 // ValidateSessionState calls the provider's ValidateSessionState function and returns the response
-func (p *SingleFlightProvider) ValidateSessionState(s *sessions.SessionState, allowedGroups []string) bool {
+func (p *SingleFlightProvider) ValidateSessionState(s *sessions.SessionState) bool {
 	response, err := p.do("ValidateSessionState", s.AccessToken, func() (interface{}, error) {
-		valid := p.provider.ValidateSessionState(s, allowedGroups)
+		valid := p.provider.ValidateSessionState(s)
 		return valid, nil
 	})
 	if err != nil {
@@ -114,9 +114,9 @@ func (p *SingleFlightProvider) ValidateSessionState(s *sessions.SessionState, al
 
 // RefreshSession takes in a SessionState and allowedGroups and
 // returns false if the session is not refreshed and true if it is.
-func (p *SingleFlightProvider) RefreshSession(s *sessions.SessionState, allowedGroups []string) (bool, error) {
+func (p *SingleFlightProvider) RefreshSession(s *sessions.SessionState) (bool, error) {
 	response, err := p.do("RefreshSession", s.RefreshToken, func() (interface{}, error) {
-		return p.provider.RefreshSession(s, allowedGroups)
+		return p.provider.RefreshSession(s)
 	})
 	if err != nil {
 		return false, err

@@ -710,9 +710,6 @@ func (p *OAuthProxy) Authenticate(rw http.ResponseWriter, req *http.Request) (er
 	remoteAddr := getRemoteAddr(req)
 	tags := []string{"action:authenticate"}
 
-	allowedGroups := p.upstreamConfig.AllowedGroups
-	invalidGroupMembershipOnRefresh := false
-
 	// Clear the session cookie if anything goes wrong.
 	defer func() {
 		if err != nil {
@@ -762,19 +759,13 @@ func (p *OAuthProxy) Authenticate(rw http.ResponseWriter, req *http.Request) (er
 		}
 		// Refresh period is the period in which the access token is valid. This is ultimately
 		// controlled by the upstream provider and tends to be around 1 hour.
-		ok, err := p.provider.RefreshSession(session, validator)
+		ok, err := p.provider.RefreshSession(session)
 		// We failed to refresh the session successfully
 		// clear the cookie and reject the request
 		if err != nil {
-			switch err {
-			case p.provider.ErrRefreshGroupMembership:
-				invalidGroupMembership = true
-			default:
-				logger.WithUser(session.Email).Error(err, "refreshing session failed")
-				return err
-			}
+			logger.WithUser(session.Email).Error(err, "refreshing session failed")
+			return err
 		}
-
 		if !ok {
 			// User is not authorized after refresh
 			// clear the cookie and reject the request
@@ -798,7 +789,7 @@ func (p *OAuthProxy) Authenticate(rw http.ResponseWriter, req *http.Request) (er
 		// check for valid requests. This should be set to something like a minute.
 		// This calls up the provider chain to validate this user is still active
 		// and hasn't been de-authorized.
-		ok := p.provider.ValidateSessionState(session, allowedGroups)
+		ok := p.provider.ValidateSessionState(session)
 		if !ok {
 			// This user is now no longer authorized, or we failed to
 			// validate the user.
@@ -820,20 +811,27 @@ func (p *OAuthProxy) Authenticate(rw http.ResponseWriter, req *http.Request) (er
 		}
 	}
 
-	// We revalidate group membership whenever the session is refreshed or revalidated
-	// just above in the call to ValidateSessionState and RefreshSession.
-	// To reduce strain on upstream identity providers we only revalidate email domains and
-	// addresses on each request here.
-	for _, v := range p.Validators {
-		_, EmailGroupValidator := v.(options.EmailGroupValidator)
-
-		if !EmailGroupValidator {
-			err := v.Validate(session)
-			if err != nil || invalidGroupMembershipOnRefresh {
+	// Run all defined validators, and allow the request if:
+	// - any one of them succeeds
+	// - any one of them returns a `ErrAuthProviderUnavailable` error, suggesting that
+	//   we can't reach the upstream provider. (at least one validator was successful
+	//   during the initial login OAuthCallback route, so we can assume here that the validator
+	//   that is failing due to an unavailable provider was that previously successful one.
+	errors := options.RunValidators(p.Validators, session)
+	if len(errors) == len(p.Validators) {
+		for key, err := range errors {
+			switch err {
+			case providers.ErrAuthProviderUnavailable:
+				if session.IsWithinGracePeriod(p.provider.Data().GracePeriodTTL) {
+					tags = append(tags, "error:validation_failed")
+					p.StatsdClient.Incr("provider_error_fallback", tags, 1.0)
+					break
+				}
+			default:
 				tags = append(tags, "error:validation_failed")
 				p.StatsdClient.Incr("application_error", tags, 1.0)
-				logger.WithRemoteAddress(remoteAddr).WithUser(session.Email).Info(
-					fmt.Sprintf("permission denied: unauthorized: %q", err))
+				logger.WithRemoteAddress(remoteAddr).WithUser(session.Email).Error(
+					fmt.Sprintf("permission denied: unauthorized: %q", errors))
 				return ErrUserNotAuthorized
 			}
 		}
