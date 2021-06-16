@@ -387,7 +387,7 @@ func (p *OAuthProxy) isXHR(req *http.Request) bool {
 // we check whether the session is within the grace period or not to determine the specific error we return.
 func (p *OAuthProxy) runValidatorsWithGracePeriod(session *sessions.SessionState) (err error) {
 	logger := log.NewLogEntry()
-	errors := validators.RunValidators(p.Validators, session)
+	errors := options.RunValidators(p.Validators, session)
 	if len(errors) == len(p.Validators) {
 		for _, err := range errors {
 			// Check to see if the auth provider is explicity denying authentication, or if it is merely unavailable.
@@ -770,13 +770,6 @@ func (p *OAuthProxy) Authenticate(rw http.ResponseWriter, req *http.Request) (er
 			"lifetime has expired; restarting authentication")
 		return ErrLifetimeExpired
 	} else if session.RefreshPeriodExpired() {
-		validator := options.Validator
-		var validator options.Validator
-		for _, v := range p.Validators {
-			if _, ok := v.(options.EmailGroupValidator); ok {
-				validator := v
-			}
-		}
 		// Refresh period is the period in which the access token is valid. This is ultimately
 		// controlled by the upstream provider and tends to be around 1 hour.
 		ok, err := p.provider.RefreshSession(session)
