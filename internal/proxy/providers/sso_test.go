@@ -318,30 +318,15 @@ func TestSSOProviderValidateSessionState(t *testing.T) {
 		Name             string
 		SessionState     *sessions.SessionState
 		ProviderResponse int
-		Groups           []string
-		ProxyGroupIds    []string
 		ExpectedValid    bool
 	}{
 		{
-			Name: "valid when no group id set",
+			Name: "valid",
 			SessionState: &sessions.SessionState{
 				AccessToken: "abc",
 				Email:       "michael.bland@gsa.gov",
 			},
 			ProviderResponse: http.StatusOK,
-			Groups:           []string{},
-			ProxyGroupIds:    []string{},
-			ExpectedValid:    true,
-		},
-		{
-			Name: "valid when group list consists of single wildcard",
-			SessionState: &sessions.SessionState{
-				AccessToken: "abc",
-				Email:       "michael.bland@gsa.gov",
-			},
-			ProviderResponse: http.StatusOK,
-			Groups:           []string{},
-			ProxyGroupIds:    []string{"*"},
 			ExpectedValid:    true,
 		},
 		{
@@ -351,30 +336,6 @@ func TestSSOProviderValidateSessionState(t *testing.T) {
 				Email:       "michael.bland@gsa.gov",
 			},
 			ProviderResponse: http.StatusForbidden,
-			Groups:           []string{},
-			ProxyGroupIds:    []string{},
-			ExpectedValid:    false,
-		},
-		{
-			Name: "valid when the group id exists",
-			SessionState: &sessions.SessionState{
-				AccessToken: "abc",
-				Email:       "michael.bland@gsa.gov",
-			},
-			ProviderResponse: http.StatusOK,
-			Groups:           []string{"test1", "test2"},
-			ProxyGroupIds:    []string{"test1"},
-			ExpectedValid:    true,
-		},
-		{
-			Name: "invalid when the group id isn't in user groups",
-			SessionState: &sessions.SessionState{
-				AccessToken: "abc",
-				Email:       "michael.bland@gsa.gov",
-			},
-			ProviderResponse: http.StatusOK,
-			Groups:           []string{},
-			ProxyGroupIds:    []string{"test1"},
 			ExpectedValid:    false,
 		},
 		{
@@ -401,8 +362,7 @@ func TestSSOProviderValidateSessionState(t *testing.T) {
 
 			// setup group endpoint
 			body, err := json.Marshal(profileResponse{
-				Email:  tc.SessionState.Email,
-				Groups: tc.Groups,
+				Email: tc.SessionState.Email,
 			})
 			testutil.Equal(t, nil, err)
 			var profileServer *httptest.Server
@@ -421,7 +381,7 @@ func TestSSOProviderValidateSessionState(t *testing.T) {
 			p.ValidateURL, _ = url.Parse(validateServer.URL)
 			defer validateServer.Close()
 
-			valid := p.ValidateSessionState(tc.SessionState, tc.ProxyGroupIds)
+			valid := p.ValidateSessionState(tc.SessionState)
 			if valid != tc.ExpectedValid {
 				t.Errorf("got unexpected result. want=%v got=%v", tc.ExpectedValid, valid)
 			}
@@ -479,42 +439,7 @@ func TestSSOProviderRefreshSession(t *testing.T) {
 			ExpectedError:   "got 400",
 		},
 		{
-			Name: "no refresh if profile not responding",
-			SessionState: &sessions.SessionState{
-				Email:           "user@domain.com",
-				AccessToken:     "token1234",
-				RefreshDeadline: time.Now().Add(time.Duration(-1) * time.Hour),
-				RefreshToken:    "refresh1234",
-			},
-			RefreshResponse: &refreshResponse{
-				Code:        http.StatusCreated,
-				ExpiresIn:   10,
-				AccessToken: "newToken1234",
-			},
-			ProxyGroups:     []string{"test1"},
-			ExpectedRefresh: false,
-			ExpectedError:   "got 500",
-		},
-		{
-			Name: "no refresh if user no longer in group",
-			SessionState: &sessions.SessionState{
-				Email:           "user@domain.com",
-				AccessToken:     "token1234",
-				RefreshDeadline: time.Now().Add(time.Duration(-1) * time.Hour),
-				RefreshToken:    "refresh1234",
-			},
-			UserGroups:  []string{"useless"},
-			ProxyGroups: []string{"test1"},
-			RefreshResponse: &refreshResponse{
-				Code:        http.StatusCreated,
-				ExpiresIn:   10,
-				AccessToken: "newToken1234",
-			},
-			ExpectedRefresh: false,
-			ExpectedError:   "Group membership revoked",
-		},
-		{
-			Name: "successful refresh if can redeem and user in group",
+			Name: "successful refresh if can redeem",
 			SessionState: &sessions.SessionState{
 				Email:           "user@domain.com",
 				AccessToken:     "token1234",
@@ -559,11 +484,6 @@ func TestSSOProviderRefreshSession(t *testing.T) {
 			p := newSSOProvider()
 			p.GracePeriodTTL = time.Duration(3) * time.Hour
 
-			groups := []string{}
-			if tc.ProxyGroups != nil {
-				groups = tc.ProxyGroups
-			}
-
 			// set up redeem resource
 			var refreshServer *httptest.Server
 			body, err := json.Marshal(tc.RefreshResponse)
@@ -571,22 +491,8 @@ func TestSSOProviderRefreshSession(t *testing.T) {
 			p.RefreshURL, refreshServer = newTestServer(tc.RefreshResponse.Code, body)
 			defer refreshServer.Close()
 
-			// set up groups resource
-			var groupsServer *httptest.Server
-			if tc.UserGroups != nil {
-				body, err := json.Marshal(profileResponse{
-					Email:  tc.SessionState.Email,
-					Groups: tc.UserGroups,
-				})
-				testutil.Equal(t, nil, err)
-				p.ProfileURL, groupsServer = newTestServer(http.StatusOK, body)
-			} else {
-				p.ProfileURL, groupsServer = newTestServer(http.StatusInternalServerError, []byte{})
-			}
-			defer groupsServer.Close()
-
 			// run the endpoint
-			actualRefresh, err := p.RefreshSession(tc.SessionState, groups)
+			actualRefresh, err := p.RefreshSession(tc.SessionState)
 			if tc.ExpectedRefresh != actualRefresh {
 				t.Fatalf("got unexpected refresh behavior. want=%v got=%v", tc.ExpectedRefresh, actualRefresh)
 			}
