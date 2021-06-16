@@ -341,7 +341,7 @@ func (p *SSOProvider) ValidateSessionState(s *sessions.SessionState) bool {
 		// When we detect that the auth provider is not explicitly denying
 		// authentication, and is merely unavailable, we validate and continue
 		// as normal during the "grace period"
-		if isProviderUnavailable(resp.StatusCode) && p.IsWithinGracePeriod(p.GracePeriodTTL) {
+		if isProviderUnavailable(resp.StatusCode) && s.IsWithinGracePeriod(p.GracePeriodTTL) {
 			tags := []string{"action:validate_session", "error:validation_failed"}
 			p.StatsdClient.Incr("provider_error_fallback", tags, 1.0)
 			s.ValidDeadline = sessions.ExtendDeadline(p.SessionValidTTL)
