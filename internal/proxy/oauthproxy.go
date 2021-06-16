@@ -382,6 +382,26 @@ func (p *OAuthProxy) isXHR(req *http.Request) bool {
 	return req.Header.Get("X-Requested-With") == "XMLHttpRequest"
 }
 
+// runValidatorsWithGracePeriod runs all validators and upon finding errors, checks to see if the
+// auth provider is explicity denying authentication or if it's merely unavailable. If it's unavailable,
+// we check whether the session is within the grace period or not to determine the specific error we return.
+func (p *OAuthProxy) runValidatorsWithGracePeriod(session *sessions.SessionState) (err error) {
+	logger := log.NewLogEntry()
+	errors := validators.RunValidators(p.Validators, session)
+	if len(errors) == len(p.Validators) {
+		for _, err := range errors {
+			// Check to see if the auth provider is explicity denying authentication, or if it is merely unavailable.
+			if err == providers.ErrAuthProviderUnavailable && session.IsWithinGracePeriod(p.provider.Data().GracePeriodTTL) {
+				return err
+			}
+		}
+		logger.WithUser(session.Email).Error(errors,
+			"no longer authorized after validation period")
+		return ErrUserNotAuthorized
+	}
+	return nil
+}
+
 // SignOut redirects the request to the provider's sign out url.
 func (p *OAuthProxy) SignOut(rw http.ResponseWriter, req *http.Request) {
 	p.sessionStore.ClearSession(rw, req)
@@ -774,6 +794,21 @@ func (p *OAuthProxy) Authenticate(rw http.ResponseWriter, req *http.Request) (er
 			return ErrUserNotAuthorized
 		}
 
+		err = p.runValidatorsWithGracePeriod(session)
+		if err != nil {
+			switch err {
+			case providers.ErrAuthProviderUnavailable:
+				tags = append(tags, "action:refresh_session", "error:validation_failed")
+				p.StatsdClient.Incr("provider_error_fallback", tags, 1.0)
+				// TODO: Should we be extending here, again?
+				session.RefreshDeadline = sessions.ExtendDeadline(p.provider.Data().SessionValidTTL)
+			default:
+				logger.WithUser(session.Email).Error(
+					err, "no longer authorized after refreshing session")
+				return ErrUserNotAuthorized
+			}
+		}
+
 		err = p.sessionStore.SaveSession(rw, req, session)
 		if err != nil {
 			// We refreshed the session successfully, but failed to save it.
@@ -799,6 +834,21 @@ func (p *OAuthProxy) Authenticate(rw http.ResponseWriter, req *http.Request) (er
 			return ErrUserNotAuthorized
 		}
 
+		err = p.runValidatorsWithGracePeriod(session)
+		if err != nil {
+			switch err {
+			case providers.ErrAuthProviderUnavailable:
+				tags = append(tags, "action:validate_session", "error:validation_failed")
+				p.StatsdClient.Incr("provider_error_fallback", tags, 1.0)
+				// TODO: Should we be extending this, again?
+				session.ValidDeadline = sessions.ExtendDeadline(p.provider.Data().SessionValidTTL)
+			default:
+				logger.WithUser(session.Email).Error(
+					err, "no longer authorized after validation period")
+				return ErrUserNotAuthorized
+			}
+		}
+
 		err = p.sessionStore.SaveSession(rw, req, session)
 		if err != nil {
 			// We validated the session successfully, but failed to save it.
@@ -808,32 +858,6 @@ func (p *OAuthProxy) Authenticate(rw http.ResponseWriter, req *http.Request) (er
 			logger.WithUser(session.Email).Error(
 				err, "could not save validated session")
 			return err
-		}
-	}
-
-	// Run all defined validators, and allow the request if:
-	// - any one of them succeeds
-	// - any one of them returns a `ErrAuthProviderUnavailable` error, suggesting that
-	//   we can't reach the upstream provider. (at least one validator was successful
-	//   during the initial login OAuthCallback route, so we can assume here that the validator
-	//   that is failing due to an unavailable provider was that previously successful one.
-	errors := options.RunValidators(p.Validators, session)
-	if len(errors) == len(p.Validators) {
-		for key, err := range errors {
-			switch err {
-			case providers.ErrAuthProviderUnavailable:
-				if session.IsWithinGracePeriod(p.provider.Data().GracePeriodTTL) {
-					tags = append(tags, "error:validation_failed")
-					p.StatsdClient.Incr("provider_error_fallback", tags, 1.0)
-					break
-				}
-			default:
-				tags = append(tags, "error:validation_failed")
-				p.StatsdClient.Incr("application_error", tags, 1.0)
-				logger.WithRemoteAddress(remoteAddr).WithUser(session.Email).Error(
-					fmt.Sprintf("permission denied: unauthorized: %q", errors))
-				return ErrUserNotAuthorized
-			}
 		}
 	}
 
