@@ -13,7 +13,7 @@ type MockCSRFStore struct {
 }
 
 // SetCSRF sets the ResponseCSRF string to a val
-func (ms *MockCSRFStore) SetCSRF(rw http.ResponseWriter, req *http.Request, val string) {
+func (ms *MockCSRFStore) SetCSRF(rw http.ResponseWriter, req *http.Request, val string, sameSite http.SameSite) {
 	ms.ResponseCSRF = val
 }
 
