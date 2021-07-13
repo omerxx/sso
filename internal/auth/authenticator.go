@@ -28,8 +28,9 @@ type Authenticator struct {
 	Host             string
 	Scheme           string
 
-	csrfStore    sessions.CSRFStore
-	sessionStore sessions.SessionStore
+	cookieSameSite http.SameSite
+	csrfStore      sessions.CSRFStore
+	sessionStore   sessions.SessionStore
 
 	redirectURL *url.URL // the url to receive requests at
 	provider    providers.Provider
@@ -460,7 +461,7 @@ func (p *Authenticator) OAuthStart(rw http.ResponseWriter, req *http.Request) {
 	tags := []string{"action:start"}
 
 	nonce := fmt.Sprintf("%x", aead.GenerateKey())
-	p.csrfStore.SetCSRF(rw, req, nonce)
+	p.csrfStore.SetCSRF(rw, req, nonce, p.cookieSameSite)
 	authRedirectURL, err := url.Parse(req.URL.Query().Get("redirect_uri"))
 	if err != nil || !validRedirectURI(authRedirectURL.String(), p.ProxyRootDomains) {
 		tags = append(tags, "error:invalid_redirect_parameter")
@@ -603,6 +604,7 @@ func (p *Authenticator) getOAuthCallback(rw http.ResponseWriter, req *http.Reque
 		fmt.Sprintf("oauth callback: user passed validation"))
 
 	logger.WithRemoteAddress(remoteAddr).WithUser(session.Email).Info("authentication complete")
+	session.SameSite = p.cookieSameSite
 	err = p.sessionStore.SaveSession(rw, req, session)
 	if err != nil {
 		tags = append(tags, "error:save_session_failed")
