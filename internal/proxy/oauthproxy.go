@@ -58,10 +58,11 @@ const statusInvalidHost = 421
 
 // OAuthProxy stores all the information associated with proxying the request.
 type OAuthProxy struct {
-	cookieSecure bool
-	Validators   []validators.Validator
-	redirectURL  *url.URL // the url to receive requests at
-	templates    *template.Template
+	cookieSecure   bool
+	cookieSameSite http.SameSite
+	Validators     []validators.Validator
+	redirectURL    *url.URL // the url to receive requests at
+	templates      *template.Template
 
 	StatsdClient *statsd.Client
 
@@ -367,7 +368,7 @@ func (p *OAuthProxy) OAuthStart(rw http.ResponseWriter, req *http.Request, tags 
 		p.ErrorPage(rw, req, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
-	p.csrfStore.SetCSRF(rw, req, encryptedCSRF)
+	p.csrfStore.SetCSRF(rw, req, encryptedCSRF, p.cookieSameSite)
 
 	// we encrypt this value to be opaque the uri query value
 	// this value will be unique since we always use a randomized nonce as part of marshaling
@@ -504,6 +505,8 @@ func (p *OAuthProxy) OAuthCallback(rw http.ResponseWriter, req *http.Request) {
 	// automatically be seen as authorized with 'bar' upstream. Each upstream may set different
 	// validators, so the request should be reauthenticated.
 	session.AuthorizedUpstream = req.Host
+
+	session.SameSite = p.cookieSameSite
 
 	// We store the session in a cookie and redirect the user back to the application
 	err = p.sessionStore.SaveSession(rw, req, session)
