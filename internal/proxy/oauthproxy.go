@@ -368,7 +368,7 @@ func (p *OAuthProxy) OAuthStart(rw http.ResponseWriter, req *http.Request, tags 
 		p.ErrorPage(rw, req, http.StatusInternalServerError, "Internal Error", err.Error())
 		return
 	}
-	p.csrfStore.SetCSRF(rw, req, encryptedCSRF, p.cookieSameSite)
+	p.csrfStore.SetCSRF(rw, req, encryptedCSRF, http.SameSiteLaxMode)
 
 	// we encrypt this value to be opaque the uri query value
 	// this value will be unique since we always use a randomized nonce as part of marshaling
